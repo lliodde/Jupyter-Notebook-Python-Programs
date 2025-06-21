@@ -1,0 +1,66 @@
+import os
+import requests
+from bs4 import BeautifulSoup
+import csv
+
+# --- 1. Configuration ---
+# The target URL with the table you want to scrape
+PAGE_URL = "https://www.ntrc.gov.ph/15-court-decisions/123-supreme-court-decisions-2014"
+
+# The name of the output file
+CSV_FILENAME = "2014_SC_Decisions.csv"
+
+# It's always good practice to include headers to act like a browser
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+}
+
+# --- 2. Main Script Logic ---
+print(f"Attempting to scrape table from: {PAGE_URL}")
+
+try:
+    # Fetch the HTML content of the page
+    response = requests.get(PAGE_URL, headers=HEADERS)
+    response.raise_for_status() # Check for errors like 404 Not Found
+
+    # Parse the HTML
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    # Find the table in the main content area
+    # We look for the 'item-page' div first to make sure we get the right table
+    content_area = soup.find('div', class_='item-page')
+    if content_area:
+        table = content_area.find('table')
+    else:
+        table = None
+
+    if table:
+        print("Table found on the page. Processing rows...")
+        
+        # Open a new CSV file to write the data into
+        with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            
+            # Find all rows in the table (including the header)
+            rows = table.find_all('tr')
+            
+            # Process each row
+            for row in rows:
+                # Get all cells (th for header, td for data) in the row
+                cells = row.find_all(['th', 'td'])
+                
+                # Clean up the text in each cell and create a list
+                # The .strip() method removes leading/trailing whitespace
+                # The .replace() method can clean up multiple newlines inside a cell
+                row_data = [cell.text.strip().replace('\n', ' ') for cell in cells]
+                
+                # Write the cleaned-up row to the CSV file
+                csv_writer.writerow(row_data)
+        
+        print(f"\nSuccess! Data has been written to '{CSV_FILENAME}'")
+
+    else:
+        print("Could not find a table on the page. Please check the URL.")
+
+except requests.exceptions.RequestException as e:
+    print(f"An error occurred while fetching the webpage: {e}")
