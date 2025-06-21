@@ -1,0 +1,190 @@
+import os
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+import time
+import re
+
+# It's always good practice to include headers to act like a browser
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+}
+BASE_URL = "https://www.ntrc.gov.ph/"
+
+# --- Function for direct PDF downloads (CTA) ---
+def scrape_cta_page(page_url, save_dir):
+    """Scrapes a page with direct links to PDF files."""
+    print(f"  Scraping direct-link page: {page_url}")
+    download_count = 0
+    try:
+        os.makedirs(save_dir, exist_ok=True)
+        response = requests.get(page_url, headers=HEADERS)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        content_area = soup.find('div', class_='item-page')
+        if not content_area: return 0
+        for link_tag in content_area.find_all('a'):
+            pdf_relative_url = link_tag.get('href')
+            if isinstance(pdf_relative_url, str) and '.pdf' in pdf_relative_url.lower():
+                full_pdf_url = urljoin(BASE_URL, pdf_relative_url)
+                filename = os.path.basename(pdf_relative_url)
+                file_path = os.path.join(save_dir, filename)
+                if not os.path.exists(file_path):
+                    print(f"    -> Downloading: {filename}...")
+                    pdf_response = requests.get(full_pdf_url, headers=HEADERS, timeout=60)
+                    pdf_response.raise_for_status()
+                    with open(file_path, 'wb') as f: f.write(pdf_response.content)
+                    download_count += 1
+                else: print(f"    -> Already exists: {filename}")
+        if download_count == 0 and len(content_area.find_all('a')) > 1: print("    -> Found links, but no new PDFs to download.")
+        print(f"  -> Finished. Downloaded {download_count} new files.")
+    except requests.exceptions.RequestException as e: print(f"  -> An error occurred: {e}")
+    return download_count
+
+# --- UPGRADED Function for two-step downloads (Supreme Court) ---
+def scrape_sc_page(ntrc_page_url, save_dir):
+    """Scrapes pages that link to the SC website, now handling both href and onclick links."""
+    print(f"  Scraping two-step page: {ntrc_page_url}")
+    download_count = 0
+    os.makedirs(save_dir, exist_ok=True)
+    sc_page_links = []
+    try:
+        response = requests.get(ntrc_page_url, headers=HEADERS)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        content_area = soup.find('div', class_='item-page')
+        if content_area:
+            for link_tag in content_area.find_all('a'):
+                href, onclick = link_tag.get('href'), link_tag.get('onclick')
+                if href and 'sc.judiciary.gov.ph' in href: sc_page_links.append(href)
+                elif onclick and 'sc.judiciary.gov.ph' in onclick:
+                    match = re.search(r"window\.open\('([^']*)'", onclick)
+                    if match: sc_page_links.append(match.group(1))
+        print(f"  Found {len(sc_page_links)} links to Supreme Court pages.")
+    except requests.exceptions.RequestException as e:
+        print(f"  -> Failed to fetch the NTRC page: {e}")
+        return 0
+    for page_url in sc_page_links:
+        try:
+            print(f"    -> Visiting case page: {page_url[:70]}...")
+            time.sleep(1)
+            case_page_response = requests.get(page_url, headers=HEADERS, timeout=60)
+            case_page_response.raise_for_status()
+            case_soup = BeautifulSoup(case_page_response.content, 'html.parser')
+            final_pdf_link_tag = case_soup.find('a', href=lambda h: h and h.lower().endswith('.pdf'))
+            if final_pdf_link_tag:
+                pdf_url = final_pdf_link_tag['href']
+                case_id = page_url.strip('/').split('/')[-1]
+                filename = f"SC_Decision_{case_id}.pdf"
+                file_path = os.path.join(save_dir, filename)
+                if not os.path.exists(file_path):
+                    print(f"      -> Found PDF. Downloading as {filename}...")
+                    pdf_response = requests.get(pdf_url, headers=HEADERS, timeout=60)
+                    pdf_response.raise_for_status()
+                    with open(file_path, 'wb') as f: f.write(pdf_response.content)
+                    download_count += 1
+                else: print(f"      -> Already exists: {filename}")
+            else: print("      -> Could not find a direct PDF link on this page.")
+        except requests.exceptions.RequestException as e: print(f"      -> Failed to process page {page_url}: {e}")
+    print(f"  -> Finished. Downloaded {download_count} new files.")
+    return download_count
+
+# --- FINALIZED Function for E-Library HTML saving ---
+def scrape_elibrary_page(ntrc_page_url, save_dir):
+    """Scrapes pages that link to the E-Library, saving the content as HTML."""
+    print(f"  Scraping E-Library page: {ntrc_page_url}")
+    saved_count = 0
+    os.makedirs(save_dir, exist_ok=True)
+    elibrary_links = []
+    try:
+        response = requests.get(ntrc_page_url, headers=HEADERS)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        content_area = soup.find('div', class_='item-page')
+        if content_area:
+            for link_tag in content_area.find_all('a'):
+                href = link_tag.get('href')
+                if href and 'elibrary.judiciary.gov.ph' in href:
+                    elibrary_links.append(href)
+        print(f"  Found {len(elibrary_links)} links to E-Library pages.")
+    except requests.exceptions.RequestException as e:
+        print(f"  -> Failed to fetch the NTRC page: {e}")
+        return 0
+    for page_url in elibrary_links:
+        try:
+            print(f"    -> Visiting E-Library page: {page_url[:70]}...")
+            time.sleep(1)
+            case_page_response = requests.get(page_url, headers=HEADERS, timeout=60)
+            case_page_response.raise_for_status()
+            # The E-Library pages can have malformed HTML, so we use the default parser
+            case_soup = BeautifulSoup(case_page_response.content, 'html.parser')
+            
+            # --- FINAL FIX: The content is inside a <font> tag, not a div ---
+            ruling_content = case_soup.find('font', attrs={'face': 'Verdana'})
+
+            if ruling_content:
+                case_id = page_url.strip('/').split('/')[-1]
+                filename = f"ELibrary_Case_{case_id}.html"
+                file_path = os.path.join(save_dir, filename)
+
+                if not os.path.exists(file_path):
+                    print(f"      -> Found content. Saving as {filename}...")
+                    # Save the content as an HTML file
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        # We use .prettify() to make the saved HTML readable
+                        f.write(ruling_content.prettify())
+                    saved_count += 1
+                else:
+                    print(f"      -> Already exists: {filename}")
+            else:
+                print("      -> Could not find ruling content on this page.")
+        except requests.exceptions.RequestException as e:
+            print(f"      -> Failed to process page {page_url}: {e}")
+    print(f"  -> Finished. Saved {saved_count} new HTML files.")
+    return saved_count
+
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    # This list defines all the pages to be scraped.
+    targets = [
+        {'year': 2025, 'type': 'CTA', 'url': 'https://www.ntrc.gov.ph/15-court-decisions/248-2025-court-of-tax-appeals-en-banc-decisions'},
+        {'year': 2024, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/15-court-decisions/241-2024-supreme-court-decisions'},
+        {'year': 2024, 'type': 'CTA', 'url': 'https://www.ntrc.gov.ph/15-court-decisions/239-2024-court-of-tax-appeals-en-banc-decisions'},
+        {'year': 2023, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/15-court-decisions/235-2023-supreme-court-decisions'},
+        {'year': 2023, 'type': 'CTA', 'url': 'https://www.ntrc.gov.ph/15-court-decisions/227-2023-court-of-tax-appeals-decisions'},
+        {'year': 2022, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/15-court-decisions/223-2022-supreme-court-decisions'},
+        {'year': 2022, 'type': 'CTA', 'url': 'https://www.ntrc.gov.ph/15-court-decisions/224-2022-court-of-tax-appeals-en-banc-decisions'},
+        {'year': 2021, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/15-court-decisions/222-2021-supreme-court-decisions'},
+        {'year': 2020, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/15-court-decisions/217-2020-supreme-court-decisions'},
+        {'year': 2019, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/tax-info/court-decisions/2019-supreme-court-decisions'},
+        {'year': 2018, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/tax-info/court-decisions/2018-supreme-court-decisions'},
+        {'year': 2017, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/tax-info/court-decisions/2017-supreme-court-decisions'},
+        {'year': 2016, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/tax-info/court-decisions/2016-supreme-court-decisions'},
+        {'year': 2015, 'type': 'SC',  'url': 'https://www.ntrc.gov.ph/tax-info/court-decisions/2015-supreme-court-decisions'},
+        {'year': 2014, 'type': 'ELibrary', 'url': 'https://www.ntrc.gov.ph/15-court-decisions/123-supreme-court-decisions-2014'},
+    ]
+
+    total_files = 0
+    print("--- Starting Master Download Script (v5 - Final) ---")
+    
+    for target in targets:
+        year, type, url = target['year'], target['type'], target['url']
+        save_dir = f"{type}_Rulings_{year}"
+        
+        print(f"\n>>> Processing: {year} {type} Rulings")
+        
+        if type == 'CTA':
+            count = scrape_cta_page(url, save_dir)
+            total_files += count
+        elif type == 'SC':
+            count = scrape_sc_page(url, save_dir)
+            total_files += count
+        elif type == 'ELibrary':
+            count = scrape_elibrary_page(url, save_dir)
+            total_files += count
+        else:
+            print(f"  -> Unknown type '{type}' for year {year}. Skipping.")
+    
+    print(f"\n--- ALL TASKS COMPLETE ---")
+    print(f"Total new files downloaded or saved: {total_files}")
