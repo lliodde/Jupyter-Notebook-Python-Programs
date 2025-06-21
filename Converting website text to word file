@@ -1,0 +1,118 @@
+import os
+import csv
+import requests
+from bs4 import BeautifulSoup
+from docx import Document
+from datetime import datetime
+import time
+import re
+
+# --- 1. Configuration ---
+CSV_FILENAME = "2014-2021_SC_Decisions.csv"
+SAVE_DIR = "SCRA_Word_Files_Final"
+os.makedirs(SAVE_DIR, exist_ok=True)
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+
+def parse_flexible_date(date_str):
+    """Tries to parse a date string using a list of possible formats."""
+    date_formats = ["%B %d, %Y", "%d-%b-%y", "%m/%d/%Y"]
+    for fmt in date_formats:
+        try:
+            return datetime.strptime(date_str.strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
+def scrape_and_save_case(url, filepath):
+    """
+    Visits a lawphil.net URL, scrapes the content using multiple methods, and saves it as a .docx file.
+    """
+    try:
+        print(f"    -> Scraping: {url}")
+        response = requests.get(url, headers=HEADERS, timeout=60)
+        
+        if response.status_code == 404:
+            print("    -> Page not found (404). This G.R. number may have a different URL format on Lawphil.")
+            return False
+
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # --- FINAL FIX: Use a fallback system to find the content ---
+        text_content = ""
+        
+        # Method 1: Try to find the specific <font> tag first (most precise)
+        font_tags = soup.find_all('font')
+        if len(font_tags) > 1:
+            main_content = font_tags[1]
+            text_content = main_content.get_text(separator='\n', strip=True)
+            print("    -> Method 1: Found content in specific <font> tag.")
+        
+        # Method 2: If Method 1 fails, fall back to grabbing all paragraphs (more general)
+        if not text_content:
+            paragraphs = soup.find_all('p')
+            if paragraphs:
+                text_content = '\n\n'.join(p.get_text(strip=True) for p in paragraphs)
+                print("    -> Method 2 (Fallback): Found content in <p> tags.")
+
+        # If we successfully found text with either method, save it.
+        if text_content:
+            doc = Document()
+            doc.add_heading(f"Source: {url}", level=2)
+            doc.add_paragraph(text_content)
+            doc.save(filepath)
+            print(f"    -> Success! Saved to {filepath}")
+            return True
+        else:
+            print("    -> Could not find any usable content on this page.")
+            return False
+
+    except requests.exceptions.RequestException as e:
+        print(f"    -> An error occurred during request: {e}")
+        return False
+    except Exception as e:
+        print(f"    -> An unexpected error occurred: {e}")
+        return False
+
+# --- 2. Main Script Logic ---
+print(f"--- Starting Lawphil.net Scraper (v5 - Final with Fallback) ---")
+try:
+    with open(CSV_FILENAME, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        header = next(reader)
+
+        for i, row in enumerate(reader):
+            if not row or len(row) < 3: continue
+
+            gr_raw = row[0]
+            date_str = row[2]
+            print(f"\n[{i+1}] Processing: {gr_raw}")
+
+            date_obj = parse_flexible_date(date_str)
+
+            if date_obj:
+                gr_primary = gr_raw.split('/')[0].strip()
+                gr_clean = re.sub(r'[^0-9-]', '', gr_primary)
+
+                year = date_obj.year
+                month_abbr = date_obj.strftime("%b").lower()
+                lawphil_url = f"https://lawphil.net/judjuris/juri{year}/{month_abbr}{year}/gr_{gr_clean}_{year}.html"
+                
+                filename = f"{gr_clean}_scra.docx"
+                filepath = os.path.join(SAVE_DIR, filename)
+
+                if os.path.exists(filepath):
+                    print(f"    -> File already exists: {filename}. Skipping.")
+                    continue
+
+                scrape_and_save_case(lawphil_url, filepath)
+                time.sleep(1)
+            else:
+                print(f"    -> Could not understand date format: '{date_str}'. Skipping.")
+
+except FileNotFoundError:
+    print(f"ERROR: The file '{CSV_FILENAME}' was not found.")
+except Exception as e:
+    print(f"An unexpected error occurred while reading the CSV: {e}")
+
+print("\n--- All tasks complete. ---")
