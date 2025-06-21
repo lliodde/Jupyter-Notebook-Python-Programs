@@ -1,0 +1,48 @@
+import os
+
+# --- 1. Set the path to your folder ---
+# Replace the placeholder with the actual path to your "TAX LAWS" folder.
+# Example for Windows: r"C:\Users\YourUsername\My Drive\TAX LAWS"
+# The 'r' before the string is important; it tells Python to treat backslashes as literal characters.
+folder_path = r"C:\Users\user\TAX LAWS"
+
+# --- 2. Get the list of files in the directory ---
+try:
+    files = os.listdir(folder_path)
+except FileNotFoundError:
+    print(f"Error: The folder path '{folder_path}' was not found.")
+    print("Please make sure you have pasted the correct path.")
+    files = []
+
+# --- 3. Loop through each file and rename it ---
+for filename in files:
+    # Check if the file starts with "RDAO No. " and ends with ".pdf"
+    if filename.startswith("RR No. ") and filename.endswith(".pdf"):
+        # Original path of the file
+        old_file_path = os.path.join(folder_path, filename)
+
+        # Isolate the part of the string with the date (e.g., "01-2021")
+        # This removes the prefix "RDAO No. " and the suffix ".pdf"
+        date_part = filename.replace("RR No. ", "").replace(".pdf", "")
+
+        # Split the date part into month and year
+        try:
+            month, year = date_part.split('-')
+
+            # --- Create the new filename ---
+            # Re-arrange to "YYYY-MM" format
+            new_date_part = f"{year}-{month}"
+            new_filename = f"RR No. {new_date_part}.pdf"
+
+            # New path for the file
+            new_file_path = os.path.join(folder_path, new_filename)
+
+            # --- Rename the file ---
+            os.rename(old_file_path, new_file_path)
+
+            print(f"Renamed: '{filename}' to '{new_filename}'")
+
+        except ValueError:
+            print(f"Skipped '{filename}': Does not seem to have the 'MM-YYYY' format.")
+
+print("\nFile renaming process complete.")
