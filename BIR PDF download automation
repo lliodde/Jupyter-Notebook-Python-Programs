@@ -1,0 +1,138 @@
+import os
+import time
+import requests
+from urllib.parse import urljoin
+
+# Selenium imports
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+# --- THIS IS THE MISSING IMPORT LINE ---
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+# --- 1. SETUP ---
+start_url = 'https://www.bir.gov.ph/revenue-issuances-details'
+download_dir = 'bir_pdf_downloads'
+if not os.path.exists(download_dir):
+    os.makedirs(download_dir)
+    print(f"Created directory: {download_dir}")
+
+# --- 2. CONFIGURE AND LAUNCH BROWSER ---
+print("Configuring browser...")
+options = webdriver.ChromeOptions()
+options.add_argument("--start-maximized")
+options.add_argument('--disable-blink-features=AutomationControlled')
+options.add_experimental_option("excludeSwitches", ["enable-automation"])
+options.add_experimental_option('useAutomationExtension', False)
+
+try:
+    service = ChromeService(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+    print("Browser launched successfully!")
+except Exception as e:
+    print(f"FATAL: Failed to launch the browser. Error: {e}")
+    exit()
+
+# --- 3. FIND & FILTER LINKS ---
+all_category_links = []
+final_links_to_scan = []
+all_pdf_links_to_download = {}
+
+try:
+    print(f"\nNavigating to start page: {start_url}")
+    driver.get(start_url)
+    
+    print("Waiting for 30 seconds to allow all page scripts to load...")
+    time.sleep(30)
+        
+    print("Finding all links on the page...")
+    all_page_links = driver.find_elements(By.TAG_NAME, "a")
+
+    print("Filtering links to find valid issuance categories...")
+    for link in all_page_links:
+        href = link.get_attribute('href')
+        if href:
+            is_revenue_link = "-Revenue-Regulations" in href or \
+                              "-Revenue-Memorandum-Order" in href or \
+                              "-Revenue-Memorandum-Circulars" in href or \
+                              "-Revenue-Administrative-Orders" in href or \
+                              "-Revenue-Delegation-Authority-Orders" in href
+            
+            if is_revenue_link and href not in all_category_links:
+                all_category_links.append(href)
+    
+    if not all_category_links:
+        print("CRITICAL: No valid category links were found after filtering.")
+    else:
+        print(f"Success! Found {len(all_category_links)} potential category pages.")
+        
+        years_input = input("\nEnter the years you want to download (e.g., 2024, 2023). Leave blank to download all found years: ")
+        target_years = [year.strip() for year in years_input.split(',') if year.strip().isdigit()]
+
+        if target_years:
+            print(f"Filtering for years: {', '.join(target_years)}")
+            for link in all_category_links:
+                if any(f'/{year}-' in link for year in target_years):
+                    final_links_to_scan.append(link)
+        else:
+            print("No specific years entered. Scanning all found categories.")
+            final_links_to_scan = all_category_links
+    
+    if final_links_to_scan:
+        print(f"\nScanning {len(final_links_to_scan)} pages for 'Full Text' PDF links...")
+        wait = WebDriverWait(driver, 20) # This line now works because of the added import
+        for page_url in final_links_to_scan:
+            print(f"  Navigating to: ...{page_url.split('/')[-1]}")
+            driver.get(page_url)
+            try:
+                wait.until(EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Full Text")))
+                full_text_links = driver.find_elements(By.PARTIAL_LINK_TEXT, "Full Text")
+                print(f"    --> Found {len(full_text_links)} 'Full Text' PDF links.")
+                
+                for link in full_text_links:
+                    pdf_href = link.get_attribute('href')
+                    table_row = link.find_element(By.XPATH, "./ancestor::tr")
+                    title_cell = table_row.find_element(By.XPATH, "./td[1]")
+                    filename_text = title_cell.text.strip().replace(':', '-')
+                    safe_filename = "".join([c for c in filename_text if c.isalnum() or c in (' ', '.', '_', '-')]).rstrip() + '.pdf'
+                    
+                    if pdf_href not in all_pdf_links_to_download:
+                        all_pdf_links_to_download[pdf_href] = safe_filename
+            except TimeoutException:
+                print(f"    --> WARNING: No 'Full Text' links found on this page before timeout.")
+                continue
+    
+    # --- 4. DOWNLOAD THE PDFS ---
+    print(f"\n-------------------------------------------------")
+    print(f"Found a total of {len(all_pdf_links_to_download)} unique PDFs to download.")
+    print(f"-------------------------------------------------")
+
+    if all_pdf_links_to_download:
+        for pdf_url, file_name in all_pdf_links_to_download.items():
+            try:
+                file_path = os.path.join(download_dir, file_name)
+                if os.path.exists(file_path):
+                    print(f"Skipping {file_name} (already exists).")
+                    continue
+
+                print(f"Downloading: {file_name}")
+                headers = {'User-agent': 'Mozilla/5.0'}
+                pdf_response = requests.get(pdf_url, stream=True, timeout=60, headers=headers)
+                pdf_response.raise_for_status()
+
+                with open(file_path, 'wb') as f:
+                    for chunk in pdf_response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            except requests.exceptions.RequestException as e:
+                print(f"--> FAILED to download {file_name}. Error: {e}")
+
+except Exception as e:
+    print(f"\nAn unexpected error occurred during scraping: {e}")
+finally:
+    print("\nClosing the browser.")
+    driver.quit()
+
+print("\nAutomation complete!")
