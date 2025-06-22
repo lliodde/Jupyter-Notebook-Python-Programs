@@ -1,0 +1,76 @@
+import os
+from PyPDF2 import PdfMerger
+from collections import defaultdict
+
+def merge_pdfs_by_year(source_folder, output_folder):
+    """
+    Merges PDF files in a source folder into single PDFs based on their year,
+    saving the merged files to an output folder.
+
+    Args:
+        source_folder (str): The path to the folder containing the PDFs to merge.
+        output_folder (str): The path to the folder where merged PDFs will be saved.
+    """
+    # --- Step 1: Ensure the output directory exists ---
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        print(f"Created output directory: {output_folder}")
+
+    # --- Step 2: Group PDF files by year ---
+    # defaultdict is a handy way to group items into a list.
+    pdfs_by_year = defaultdict(list)
+    
+    print(f"\nScanning source folder: {source_folder}")
+    for filename in os.listdir(source_folder):
+        # Check if the file is a PDF and follows the expected naming convention (YYYY_...)
+        if filename.endswith(".pdf") and filename[:4].isdigit():
+            year = filename[:4]
+            full_path = os.path.join(source_folder, filename)
+            pdfs_by_year[year].append(full_path)
+            
+    if not pdfs_by_year:
+        print("No PDF files found with the expected 'YYYY_...' naming format.")
+        return
+
+    print("\nFound files to merge for the following years:", list(pdfs_by_year.keys()))
+
+    # --- Step 3: Iterate through each year and merge the corresponding PDFs ---
+    for year, file_list in pdfs_by_year.items():
+        print("-" * 30)
+        print(f"Processing year: {year} ({len(file_list)} files)")
+        
+        # It's good practice to sort the files to ensure a consistent merge order
+        file_list.sort()
+        
+        merger = PdfMerger()
+        
+        for pdf_path in file_list:
+            merger.append(pdf_path)
+            
+        # --- Step 4: Define the output filename and save the merged PDF ---
+        output_filename = f"{year}_scra_taxrelatedrulings.pdf"
+        output_filepath = os.path.join(output_folder, output_filename)
+        
+        try:
+            merger.write(output_filepath)
+            print(f"  -> Successfully created: {output_filename}")
+        except Exception as e:
+            print(f"  -> An error occurred while merging for year {year}: {e}")
+        finally:
+            # Important to close the merger object to free up file resources
+            merger.close()
+            
+    print("\n--- Merge process complete! ---")
+
+
+# --- IMPORTANT: Set your folder paths here ---
+# This is the folder where your '2014_120051_scra.pdf' files are located.
+# Use an 'r' before the string to handle backslashes correctly on Windows.
+source_folder_path = r"c:\Users\user\SCRA_Word_Files_final"
+
+# We will create a new subfolder to store the final merged files.
+output_folder_path = r"c:\Users\user\SCRA_Word_Files_final\Merged_by_Year"
+
+
+# Call the function to start the merging process
+merge_pdfs_by_year(source_folder_path, output_folder_path)
