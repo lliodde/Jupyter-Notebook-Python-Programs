@@ -1,0 +1,73 @@
+import os
+import re
+from docx import Document
+from docx2pdf import convert
+
+def process_word_documents(folder_path):
+    """
+    Renames Word documents based on the year found in the first few lines
+    and then converts them to PDF.
+
+    Args:
+        folder_path (str): The absolute path to the folder containing the Word files.
+    """
+    print(f"Scanning folder: {folder_path}\n")
+
+    # --- Step 1: Iterate through all files in the directory ---
+    for filename in os.listdir(folder_path):
+        # --- Step 2: Check if the file is a .docx file ---
+        if filename.endswith(".docx"):
+            original_file_path = os.path.join(folder_path, filename)
+            print(f"Processing: {filename}")
+
+            try:
+                # --- Step 3: Open the Word document ---
+                document = Document(original_file_path)
+                year_found = None
+
+                # --- Step 4: Search for the year in the first few paragraphs ---
+                text_to_search = ""
+                # We'll search in the first 10 paragraphs, which should be more than enough
+                for i, para in enumerate(document.paragraphs[:10]):
+                    text_to_search += para.text + "\n"
+
+                # Use a regular expression to find a four-digit number that looks like a year
+                # This pattern looks for a 4-digit number between 1900 and 2099
+                year_match = re.search(r'\b(19[0-9]{2}|20[0-9]{2})\b', text_to_search)
+
+                if year_match:
+                    year_found = year_match.group(1)
+                    print(f"  - Year found: {year_found}")
+
+                    # --- Step 5: Rename the file ---
+                    new_filename_docx = f"{year_found}_{filename}"
+                    new_file_path_docx = os.path.join(folder_path, new_filename_docx)
+
+                    # Close the document before renaming
+                    # (This is good practice, though not always strictly necessary with python-docx)
+                    # In this case, we have all we need from the document.
+                    
+                    # Rename the .docx file
+                    os.rename(original_file_path, new_file_path_docx)
+                    print(f"  - Renamed to: {new_filename_docx}")
+
+                    # --- Step 6: Convert the renamed file to PDF ---
+                    print("  - Converting to PDF...")
+                    # The output PDF will have the same name as the new .docx file, but with a .pdf extension
+                    convert(new_file_path_docx)
+                    print("  - Conversion complete.")
+
+                else:
+                    print("  - Year not found in the first few paragraphs. Skipping file.")
+
+            except Exception as e:
+                print(f"  - An error occurred: {e}")
+
+            print("-" * 20)
+
+# --- IMPORTANT: Set the path to your folder here ---
+# Use an 'r' before the string to make it a raw string, which handles backslashes correctly.
+folder_path = r"c:\Users\user\SCRA_Word_Files_final"
+
+# Call the function to start the process
+process_word_documents(folder_path)
