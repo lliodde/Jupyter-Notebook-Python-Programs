@@ -1,0 +1,84 @@
+import os
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+
+def download_cta_pdfs(url, output_folder="2023_CTA_Decisions"):
+    """
+    Scrapes and downloads all PDF files from a specific NTRC webpage.
+
+    Args:
+        url (str): The exact URL of the page to scrape.
+        output_folder (str): The name of the folder to save the PDFs in.
+    """
+    print(f"Starting the download process for: {url}")
+
+    # --- Step 1: Create a directory to store the downloaded files ---
+    # The 'exist_ok=True' argument prevents an error if the folder already exists.
+    os.makedirs(output_folder, exist_ok=True)
+    print(f"Files will be saved in: '{os.path.abspath(output_folder)}'")
+
+    # --- Step 2: Fetch the HTML content of the webpage ---
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        # Raise an exception if the request was unsuccessful (e.g., 404 Not Found)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Error: Failed to fetch the webpage. {e}")
+        return
+
+    # --- Step 3: Parse the HTML and find all PDF links ---
+    soup = BeautifulSoup(response.content, 'html.parser')
+    pdf_links = []
+    
+    # We look for all anchor tags <a>
+    for link in soup.find_all('a'):
+        href = link.get('href')
+        # Check if the link exists and ends with '.pdf' (case-insensitive)
+        if href and href.lower().endswith('.pdf'):
+            # Convert relative URLs (e.g., '/path/to/file.pdf') to absolute URLs
+            absolute_url = urljoin(url, href)
+            pdf_links.append(absolute_url)
+
+    if not pdf_links:
+        print("Could not find any PDF links on the page.")
+        return
+
+    print(f"\nFound {len(pdf_links)} PDF files to download.")
+
+    # --- Step 4: Download each PDF file ---
+    for i, pdf_url in enumerate(pdf_links):
+        try:
+            # Extract the filename from the URL (e.g., 'CTA-EB-2651.pdf')
+            filename = os.path.basename(pdf_url)
+            file_path = os.path.join(output_folder, filename)
+
+            print(f"Downloading [{i+1}/{len(pdf_links)}]: {filename}...")
+
+            # Make the request to download the actual file content
+            pdf_response = requests.get(pdf_url, headers=headers, stream=True)
+            pdf_response.raise_for_status()
+
+            # Save the file to the output folder
+            with open(file_path, 'wb') as f:
+                for chunk in pdf_response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            print(f" -> Success: Saved to {file_path}")
+
+        except requests.exceptions.RequestException as e:
+            print(f" -> Error: Failed to download {pdf_url}. {e}")
+        except Exception as e:
+            print(f" -> An unexpected error occurred: {e}")
+
+    print("\nDownload process complete!")
+
+
+# --- The target URL for the missing 2023 CTA decisions ---
+target_url = "https://www.ntrc.gov.ph/tax-info/court-decisions/2014-supreme-court-decisions/15-court-decisions/231-2023-court-of-tax-appeals-en-banc-decisions"
+
+# --- Run the function ---
+download_cta_pdfs(target_url)
