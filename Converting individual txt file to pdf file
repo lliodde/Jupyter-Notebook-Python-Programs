@@ -1,0 +1,63 @@
+import os
+from pathlib import Path
+from fpdf import FPDF
+
+# --- 1. CONFIGURATION ---
+# The folder containing all the unzipped .rst files
+root_directory = Path(r"C:/Users/user/Downloads/documentation-18.0")
+
+# A new folder to save all the smaller PDFs
+output_dir = root_directory / "small_pdfs"
+os.makedirs(output_dir, exist_ok=True) # Create the folder if it doesn't exist
+
+# Path to the Arial font on your Windows system
+arial_font_path = r"C:\Windows\Fonts\arial.ttf"
+
+# --- 2. SCRIPT LOGIC ---
+
+print(f"Starting to create smaller, themed PDFs.")
+print(f"Output will be saved in: {output_dir}")
+
+# Check if the font file exists before we start a potentially long loop
+if not Path(arial_font_path).exists():
+    print(f"❌ ERROR: Arial font not found at '{arial_font_path}'. Cannot proceed.")
+else:
+    # Use rglob to find every single sub-directory within the root directory
+    for folder in [f for f in root_directory.rglob('*') if f.is_dir()]:
+        
+        # Find all .rst files directly within this folder (not its sub-folders)
+        rst_files_in_folder = list(folder.glob('*.rst'))
+        
+        if not rst_files_in_folder:
+            continue # Skip folders that don't directly contain .rst files
+
+        # Generate a logical name for the PDF from its folder path
+        relative_path = folder.relative_to(root_directory)
+        output_filename = "doc_" + "_".join(relative_path.parts) + ".pdf"
+        output_filepath = output_dir / output_filename
+        
+        print(f"\nProcessing folder '{relative_path}' -> Creating '{output_filename}'...")
+
+        # Merge the content of all files in this specific folder
+        merged_content = ""
+        for filepath in rst_files_in_folder:
+            merged_content += f"\n\n{'='*80}\n--- CONTENT FROM: {filepath.name} ---\n{'='*80}\n\n"
+            try:
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    merged_content += f.read()
+            except Exception as e:
+                print(f"  - Could not read {filepath.name}: {e}")
+        
+        # --- Convert this merged content to its own PDF ---
+        try:
+            pdf = FPDF()
+            pdf.add_font('Arial', '', arial_font_path)
+            pdf.set_font('Arial', size=9)
+            pdf.add_page()
+            pdf.multi_cell(0, 4, text=merged_content)
+            pdf.output(output_filepath)
+            print(f"  ✅ Success! Created '{output_filename}'.")
+        except Exception as e:
+            print(f"  ❌ ERROR creating PDF for folder '{relative_path}': {e}")
+
+print("\n\nAll done! Your smaller PDFs are ready for NotebookLM.")
