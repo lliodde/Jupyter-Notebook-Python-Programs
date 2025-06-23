@@ -1,0 +1,51 @@
+import os
+from pathlib import Path
+from fpdf import FPDF
+
+# --- 1. CONFIGURATION ---
+# This should be the folder where your 'odoo_18_documentation_merged.txt' file is.
+doc_folder = Path(r"C:/Users/user/Downloads/documentation-18.0")
+input_txt_file = doc_folder / "odoo_18_documentation_merged.txt"
+output_pdf_file = doc_folder / "odoo_18_documentation_final.pdf"
+
+# Path to the Arial font on your Windows system.
+arial_font_path = r"C:\Windows\Fonts\arial.ttf"
+
+# --- 2. CONVERT THE EXISTING TEXT FILE TO PDF ---
+
+print(f"Starting PDF conversion for the large text file: '{input_txt_file.name}'")
+print("This process will take several minutes due to the file size. Please be patient.")
+
+# Check if the necessary files exist before starting
+if not input_txt_file.exists():
+    print(f"❌ ERROR: Input file not found at '{input_txt_file}'")
+elif not Path(arial_font_path).exists():
+    print(f"❌ ERROR: Arial font not found at '{arial_font_path}'. This script requires Windows.")
+else:
+    try:
+        # Initialize the PDF object
+        pdf = FPDF()
+        
+        # Add the Arial font, pointing directly to the file on your system
+        pdf.add_font('Arial', '', arial_font_path)
+        
+        # Set Arial as the active font
+        pdf.set_font('Arial', size=9)
+        
+        pdf.add_page()
+        
+        # Read the text from your huge merged file
+        with open(input_txt_file, 'r', encoding='utf-8') as f:
+            text_content = f.read()
+        
+        # Write the text to the PDF. multi_cell handles all line and page breaks automatically.
+        pdf.multi_cell(0, 4, text=text_content)
+        
+        # Save the final PDF file. This is the step that will take time.
+        print("Writing to PDF... This is the final step and may take a while.")
+        pdf.output(output_pdf_file)
+        
+        print(f"\n✅✅✅ Success! The final PDF has been created at: '{output_pdf_file}'")
+
+    except Exception as e:
+        print(f"\n❌ An error occurred during the Python PDF creation: {e}")
