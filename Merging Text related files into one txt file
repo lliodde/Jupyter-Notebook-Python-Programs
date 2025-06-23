@@ -1,0 +1,67 @@
+import os
+from pathlib import Path
+from fpdf import FPDF
+
+# --- 1. CONFIGURATION ---
+root_directory = Path(r"C:/Users/user/Downloads/documentation-18.0")
+
+# --- FIX #1: Save output files inside the documentation folder ---
+output_txt_file = root_directory / "odoo_18_documentation_merged.txt"
+output_pdf_file = root_directory / "odoo_18_documentation_merged.pdf"
+file_count = 0
+
+# --- 2. FIND AND MERGE ALL .rst FILES ---
+
+print(f"Starting the process in directory: {root_directory}")
+print(f"Output files will be saved in the same directory.")
+
+try:
+    rst_files = sorted(list(root_directory.rglob('**/*.rst')))
+    if not rst_files:
+        raise FileNotFoundError("No .rst files found. Please check the 'root_directory' path.")
+
+    print(f"Found {len(rst_files)} '.rst' documentation files. Merging now...")
+
+    with open(output_txt_file, 'w', encoding='utf-8') as outfile:
+        for filename in rst_files:
+            file_count += 1
+            try:
+                with open(filename, 'r', encoding='utf-8', errors='ignore') as infile:
+                    relative_path = filename.relative_to(root_directory)
+                    outfile.write(f"\n\n{'='*80}\n")
+                    outfile.write(f"--- CONTENT FROM: {relative_path} ---\n")
+                    outfile.write(f"{'='*80}\n\n")
+                    outfile.write(infile.read())
+            except Exception as e:
+                print(f"  - Could not read file {filename}: {e}")
+
+    print(f"\n✅ Success! Merged {file_count} files into '{output_txt_file}'")
+
+except FileNotFoundError as e:
+    print(f"\n❌ ERROR: {e}")
+    rst_files = []
+
+# --- 3. CONVERT THE MERGED TEXT FILE TO PDF ---
+
+if rst_files:
+    print("\nStarting PDF conversion... (This may take a few moments)")
+    try:
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # --- FIX #2: Use a Unicode-compatible font ---
+        # The fpdf2 library includes the DejaVu font for full Unicode support.
+        pdf.set_font("DejaVu", size=9)
+        
+        with open(output_txt_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                # --- FIX #3: Use 'text' instead of the old 'txt' parameter ---
+                pdf.multi_cell(0, 4, text=line)
+
+        pdf.output(output_pdf_file)
+        
+        print(f"✅ Success! Converted text file to '{output_pdf_file}'")
+        print("\nAll done! You will find both the TXT and PDF files inside your documentation folder.")
+
+    except Exception as e:
+        print(f"\n❌ ERROR during PDF conversion: {e}")
