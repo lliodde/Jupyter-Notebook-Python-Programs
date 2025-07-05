@@ -1,0 +1,146 @@
+# ==============================================================================
+# 1. IMPORT LIBRARIES
+# ==============================================================================
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.cluster import KMeans
+import nltk
+
+# --- Download stopwords (only need to run this cell once) ---
+try:
+    nltk.data.find('corpora/stopwords')
+except nltk.downloader.DownloadError:
+    nltk.download('stopwords')
+
+print("Libraries imported successfully.")
+
+
+# ==============================================================================
+# 2. LOAD AND CLEAN INITIAL DATA
+# ==============================================================================
+print("\n--- Step 2: Loading and Cleaning Data ---")
+
+# Load the data, skipping the first 2 rows to set the correct header
+try:
+    df = pd.read_csv('CASH.csv', skiprows=2)
+    print("CSV file loaded successfully.")
+except FileNotFoundError:
+    print("Error: 'CASH.csv' not found. Please ensure the file is in the same directory as your notebook.")
+    # Stop execution if file is not found
+    exit()
+
+# Forward-fill the 'Association' and 'Account' columns
+df['Association'] = df['Association'].ffill()
+df['Account'] = df['Account'].ffill()
+print("Forward-fill applied to 'Association' and 'Account'.")
+
+# Convert financial and date columns to correct data types
+df['Debit'] = pd.to_numeric(df['Debit'], errors='coerce').fillna(0)
+df['Credit'] = pd.to_numeric(df['Credit'], errors='coerce').fillna(0)
+df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+df.dropna(subset=['Date'], inplace=True) # Drop rows with invalid dates
+print("Converted Debit, Credit, and Date columns to correct types.")
+
+print("Initial data cleaning complete.")
+print(df.head())
+
+
+# ==============================================================================
+# 3. MACHINE LEARNING: TEXT CLUSTERING
+# ==============================================================================
+print("\n--- Step 3: Running Unsupervised Machine Learning ---")
+
+# Select the 'Description' column for clustering
+text_data = df['Description'].dropna()
+
+# Vectorize the text using TF-IDF
+vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
+X = vectorizer.fit_transform(text_data)
+
+# Apply K-Means Clustering to find 5 clusters
+num_clusters = 5
+kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
+kmeans.fit(X)
+print(f"K-Means clustering complete with {num_clusters} clusters.")
+
+# Assign the cluster labels back to the DataFrame
+df.loc[text_data.index, 'New Label'] = kmeans.labels_
+
+# Map cluster labels to human-readable names
+label_map = {
+    0: 'Lockbox Deposit',
+    1: 'Check Payment Received',
+    2: 'Management/Condo Fee',
+    3: 'Opening Balance Entry',
+    4: 'Direct Debit & Returned Payments'
+}
+df['Transaction Type'] = df['New Label'].map(label_map)
+print("New 'Transaction Type' column created from cluster labels.")
+print(df[['Description', 'Transaction Type']].head())
+
+
+# ==============================================================================
+# 4. FINAL DATA REFINEMENT
+# ==============================================================================
+print("\n--- Step 4: Final Data Refinement ---")
+
+# Delete rows related to 'Opening Balance Entry'
+df = df[df['Transaction Type'] != 'Opening Balance Entry']
+print("Deleted 'Opening Balance Entry' rows.")
+
+# Delete unnecessary columns
+columns_to_drop = ['Balance', 'Trx', 'Invoice', 'Ch. #']
+df = df.drop(columns=columns_to_drop, axis=1)
+print(f"Deleted columns: {columns_to_drop}")
+print("Final columns:", df.columns)
+
+
+# ==============================================================================
+# 5. FINANCIAL ANALYSIS
+# ==============================================================================
+print("\n--- Step 5: Performing Financial Analysis ---")
+
+# Calculate total Debit and Credit for each Association/Account per month
+monthly_totals = df.groupby(['Association', 'Account', pd.Grouper(key='Date', freq='M')])[['Debit', 'Credit']].sum()
+
+# Calculate the average of these monthly totals
+average_monthly_flow = monthly_totals.groupby(['Association', 'Account'])[['Debit', 'Credit']].mean()
+
+# Calculate the net flow
+average_monthly_flow['Net Average Flow'] = average_monthly_flow['Credit'] - average_monthly_flow['Debit']
+
+# Sort the results for review
+final_analysis = average_monthly_flow.sort_values('Net Average Flow', ascending=False)
+print("Final Financial Analysis Table:")
+print(final_analysis)
+
+
+# ==============================================================================
+# 6. VISUALIZATION
+# ==============================================================================
+print("\n--- Step 6: Generating Visualization ---")
+
+# Aggregate the data by Association for the plot
+association_flow = final_analysis.groupby('Association')['Net Average Flow'].sum().sort_values()
+
+# Get the top and bottom 10 for a summary view
+top_10 = association_flow.tail(10)
+bottom_10 = association_flow.head(10)
+plot_data = pd.concat([top_10, bottom_10])
+
+# Create the plot
+plt.figure(figsize=(12, 10))
+colors = ['green' if x > 0 else 'red' for x in plot_data]
+plot_data.plot(kind='barh', color=colors)
+
+plt.title('Top & Bottom 10 Associations by Average Monthly Net Flow', fontsize=16)
+plt.xlabel('Average Monthly Net Flow (in $)', fontsize=12)
+plt.ylabel('Association', fontsize=12)
+plt.grid(axis='x', linestyle='--', alpha=0.7)
+plt.gca().xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+
+plt.tight_layout()
+plt.savefig('net_flow_analysis.png')
+print("Visualization saved as 'net_flow_analysis.png'.")
